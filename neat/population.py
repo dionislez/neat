@@ -1,5 +1,7 @@
 import random
 
+import numpy as np
+
 from neat.gene import Gene
 from neat.genome import Genome
 from neat.species import Species
@@ -8,44 +10,75 @@ from neat.species import Species
 class Population:
     """Класс популяции."""
 
-    def __init__(self, size):
-        self.size = size  # размер (количество) генотипов
+    def __init__(self, input_size, output_size, population_size) -> None:
+        self.input_size: int = input_size  # количество входных узлов
+        self.output_size: int = output_size  # количество выходных узлов
+        self.population_size = (
+            population_size  # размер популяции (количество генотипов)
+        )
         self.genomes = []  # генотипы
         self.species = []  # виды
-        self.innovation_number = 0
-        self.node_innovations = set()  # инновационные узлы
-        self.initialize_population()  # инициализация геномов с генами
+        self.innovation_number = 0  # иновационный номер
+        self.node_innovations = set()  # новые узлы после мутации
+        self.initialize_population()  # инициализация генотипов и геномов по размеру
 
-    def initialize_population(self):
-        input_nodes = [0, 1]  # входные узлы
-        output_nodes = [2]  # выходные узлы
-
-        for _ in range(self.size):
-            # инициализация генома
-            genome = Genome()
-            for in_node in input_nodes:
-                for out_node in output_nodes:
-                    # инициализация гена
+    def initialize_population(self) -> None:
+        for _ in range(self.population_size):
+            genome = Genome()  # генотив
+            for in_node in range(self.input_size):
+                for out_node in range(self.output_size):
                     initial_gene = Gene(
-                        in_node=in_node,
-                        out_node=out_node,
+                        in_node=in_node,  # номер входного узла
+                        out_node=self.input_size + out_node,  # номер выходного узла
                         weight=random.uniform(-1, 1),
                         enabled=True,
                         innovation=self.innovation_number,
                     )
-                    self.innovation_number += 1  # добавление инновационного номера
-                    genome.add_gene(initial_gene)  # добавление гена генотипу
+                    self.innovation_number += 1  # инкремент инновационного номера
+                    genome.add_gene(initial_gene)  # добавление гена к генотипу
             self.genomes.append(genome)
 
-    def evaluate_fitness(self):
+    def evaluate_fitness(self, X_train: np.array, y_train: np.array) -> None:
+        # функция для расчета приспособленности генотипов
         for genome in self.genomes:
-            genome.fitness = self.calculate_fitness(genome)
+            genome.fitness = self.calculate_fitness(genome, X_train, y_train)
 
-    def calculate_fitness(self, genome):
-        # ?
-        return random.random()
+    def calculate_fitness(
+        self, genome: Genome, X_train: np.array, y_train: np.array
+    ) -> float | int:
+        # функция расчета приспособленности
+        predictions = np.array([self.feed_forward(genome, x) for x in X_train])
+        mse = np.mean((predictions - y_train) ** 2) # среднеквадратичная ошибка
+        fitness = 1 / (mse + 1e-6) # обратное значение mse для оценки приспособленности
+        # 1e-6 - предотвращение деления на 0
+        return fitness
 
-    def speciate(self):
+    def feed_forward(self, genome: Genome, inputs: np.array) -> float | int:
+        hidden_values = {}
+        for gene in genome.genes:
+            if not gene.enabled:
+                continue
+
+            in_node, out_node, weight = gene.in_node, gene.out_node, gene.weight
+            if in_node < len(inputs):
+                # если узел является входным (in_node)
+                hidden_values[out_node] = (
+                    hidden_values.get(out_node, 0) + inputs[in_node] * weight
+                )
+            else:
+                # скрытый узел (in_node)
+                hidden_values[out_node] = (
+                    hidden_values.get(out_node, 0)
+                    + hidden_values.get(in_node, 0) * weight
+                )
+        output = sum(
+            hidden_values.get(node, 0)
+            for node in range(self.input_size, self.input_size + self.output_size)
+        )  # пороговая функция активации
+        return output
+
+    def speciate(self) -> None:
+        # обнуление видов после каждого поколения для образования новых (эпохи)
         for species in self.species:
             species.genomes = []
         for genome in self.genomes:
@@ -55,21 +88,27 @@ class Population:
                     species.add_genome(genome)
                     break
             else:
-                # иначе создаем новый вид
+                # образование нового вида, если генотипы не одинаковы
                 new_species = Species(genome)
                 self.species.append(new_species)
                 new_species.add_genome(genome)
 
     def is_same_species(
-        self, genome1, genome2, compatibility_threshold=3.0, c1=1.0, c2=1.0, c3=0.4
-    ):
+        self,
+        genome1: Genome,
+        genome2: Genome,
+        compatibility_threshold: int | float = 3.0,
+        c1: int | float = 1.0,
+        c2: int | float = 1.0,
+        c3: int | float = 0.4,
+    ) -> bool:
         # Коэффициенты https://nn.cs.utexas.edu/downloads/papers/stanley.ec02.pdf
         # страница 111
 
-        excess_genes = 0  # количество избыточных генов
-        disjoint_genes = 0  # количество непересекающихся генов
-        matching_genes = 0  # количество одинаковых генов
-        weight_diff_sum = 0  # весовая разница генов (по модулю)
+        excess_genes = 0  # количество избыточных узлов
+        disjoint_genes = 0  # количество непересекающихся узлов
+        matching_genes = 0  # количество одинаковых узлов
+        weight_diff_sum = 0  # весовая разница узлов (по модулю)
 
         innovations1 = {
             gene.innovation for gene in genome1.genes
@@ -85,27 +124,31 @@ class Population:
         for innovation in all_innovations:
             gene1 = next(
                 (gene for gene in genome1.genes if gene.innovation == innovation), None
-            )
+            )  # поиск совпадения инновационного номера в 1 генотипе, иначе None
             gene2 = next(
                 (gene for gene in genome2.genes if gene.innovation == innovation), None
-            )
+            )  # поиск совпадения инновационного номера во 2 генотипе, иначе None
 
             if gene1 and gene2:
-                # если 2 генотипа имеют одинаковые гены (одинаковое инновационное число)
+                # если одинаковые инновационные числа у двух генотипов
                 # то прибавляется 1 к matching_genes, считаем весовую разность по модулю
                 matching_genes += 1
                 weight_diff_sum += abs(gene1.weight - gene2.weight)
             elif gene1 or gene2:
-                # иначе если какой-то ген есть, то прибавляется 1 к matching_genes
-                # считаем весовую разность по модулю
+                # если у кого-то из генотипов нашелся инновационный номер, то
                 if innovation > max(max(innovations1), max(innovations2)):
+                    # проверка на избыточный узел по поиску максимального инновационного номера
+                    # из 2 генотипов
                     excess_genes += 1
                     continue
+                # иначе узлы не пересекаются
                 disjoint_genes += 1
 
-        N = max(len(genome1.genes), len(genome2.genes))
+        N = max(
+            len(genome1.genes), len(genome2.genes)
+        )  # максимальное количество генов из 2 генотипов
         if N < 20:
-            N = 1  # Если генотип маленький, то присваиваем единицу
+            N = 1  # если генотип маленький
 
         # рассчитываем расстояние совместимости генотипов (проверка деления на 0)
         compatibility = (
@@ -113,24 +156,36 @@ class Population:
             + (c2 * disjoint_genes / N)
             + (c3 * weight_diff_sum / matching_genes if matching_genes > 0 else 0)
         )
-        return compatibility < compatibility_threshold
+        return (
+            compatibility < compatibility_threshold
+        )  # проверка с порогом совместимости
 
     def reproduce(self):
+        # функция образования нового генотипа (воспроизведение)
         new_genomes = []
         for species in self.species:
             if not species.genomes:
                 continue
+
+            # добавление наиболее приспособленных генотипов
             species.genomes.sort(key=lambda g: g.fitness, reverse=True)
-            new_genomes.append(species.genomes[0])  # Elitism: keep the best genome
-            for _ in range(len(species.genomes) - 1):
+            new_genomes.append(species.genomes[0])
+
+            for _ in range(len(species.genomes)):
+                # выбор любых 2 родителей
                 parent1 = random.choice(species.genomes)
                 parent2 = random.choice(species.genomes)
+                # скрещивание
                 child = self.crossover(parent1, parent2)
+                # мутация
                 self.mutate(child)
+                # образование нового генотипа
                 new_genomes.append(child)
+        # новые генотипы
         self.genomes = new_genomes
 
     def crossover(self, parent1, parent2):
+        # скрещивание (выбор одного из 2 родителей для унаследования генов)
         child = Genome()
         parent1_genes = {gene.innovation: gene for gene in parent1.genes}
         parent2_genes = {gene.innovation: gene for gene in parent2.genes}
@@ -163,7 +218,7 @@ class Population:
 
         return child
 
-    def mutate(self, genome):
+    def mutate(self, genome: Genome) -> None:
         # вероятность изменения существующего гена
         mutation_rate = 0.8
         # вероятность добавления нового узла путем разрыва существующей связи
@@ -183,13 +238,15 @@ class Population:
         if random.random() < add_link_rate:
             self.add_link_mutation(genome)
 
-    def add_node_mutation(self, genome):
+    def add_node_mutation(self, genome: Genome) -> None:
         if not genome.genes:
             return
 
+        # случайный ген для разрыва связи
         gene_to_split = random.choice(genome.genes)
         gene_to_split.enabled = False
 
+        # новый узел
         new_node = max(genome.nodes) + 1
         self.node_innovations.add(new_node)
         genome.nodes.add(new_node)
@@ -214,7 +271,7 @@ class Population:
         self.innovation_number += 1
         genome.add_gene(gene2)
 
-    def add_link_mutation(self, genome):
+    def add_link_mutation(self, genome: Genome) -> None:
         if len(genome.nodes) < 2:
             return
 
@@ -233,7 +290,7 @@ class Population:
         self.innovation_number += 1
         genome.add_gene(new_gene)
 
-    def run_generation(self):
-        self.evaluate_fitness()
+    def run_generation(self, X_train: np.array, y_train: np.array) -> None:
+        self.evaluate_fitness(X_train, y_train)
         self.speciate()
         self.reproduce()
