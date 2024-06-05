@@ -1,11 +1,12 @@
+from neat.genome import Genome
+
+
 class Species:
     """Класс создания новых видов."""
 
-    def __init__(self, representative):
-        self.representative = representative  # генотип вида
-        self.genomes = []
-        self.best_fitness = 0
-        self.stagnation = 0
+    def __init__(self, representative: Genome) -> None:
+        self.representative = representative  # представитель вида
+        self.genomes = []  # генотипы вида
 
-    def add_genome(self, genome):
+    def add_genome(self, genome: Genome) -> None:
         self.genomes.append(genome)
