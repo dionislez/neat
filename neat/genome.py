@@ -6,17 +6,18 @@ from neat.gene import Gene
 class Genome:
     """Класс объявления генотипа."""
 
-    def __init__(self):
-        self.genes: list[Gene] = []
-        self.nodes: set[int] = set()
-        self.fitness: int = 0
+    def __init__(self) -> None:
+        self.genes: list[Gene] = []  # гены генотипа
+        self.nodes: set[int] = set()  # уникальные узлы
+        self.fitness: int = 0  # совместимость
 
-    def add_gene(self, gene: Gene):
+    def add_gene(self, gene: Gene) -> None:
         self.genes.append(gene)
         self.nodes.add(gene.in_node)
         self.nodes.add(gene.out_node)
 
-    def get_topology(self):
+    def get_topology(self) -> None:
+        # получение топологии генотипа
         G = nx.DiGraph()
         edge_labels = {}
         for gene in self.genes:
