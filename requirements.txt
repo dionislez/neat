@@ -1,2 +1,4 @@
 matplotlib==3.9.*
 networkx==3.*
+pandas==2.2.*
+scikit-learn==1.5.*
