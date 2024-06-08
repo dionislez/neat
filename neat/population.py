@@ -19,12 +19,13 @@ class Population:
         self.genomes = []  # генотипы
         self.species = []  # виды
         self.innovation_number = 0  # иновационный номер
+        self.compatibility_threshold = 3.0  # Пороговое значение совместимости
         self.node_innovations = set()  # новые узлы после мутации
         self.initialize_population()  # инициализация генотипов и геномов по размеру
 
     def initialize_population(self) -> None:
         for _ in range(self.population_size):
-            genome = Genome()  # генотив
+            genome = Genome()  # генотип
             for in_node in range(self.input_size):
                 for out_node in range(self.output_size):
                     initial_gene = Gene(
@@ -48,10 +49,27 @@ class Population:
     ) -> float | int:
         # функция расчета приспособленности
         predictions = np.array([self.feed_forward(genome, x) for x in X_train])
-        mse = np.mean((predictions - y_train) ** 2) # среднеквадратичная ошибка
-        fitness = 1 / (mse + 1e-6) # обратное значение mse для оценки приспособленности
+        mse = np.mean((predictions - y_train) ** 2)  # среднеквадратичная ошибка
+        mae = np.mean(np.abs(predictions - y_train))  # средняя абсолютная ошибка
+        adjust_fitness = 1 / (
+            mae + 1e-6
+        )  # обратное значение mse / mae для оценки приспособленности
         # 1e-6 - предотвращение деления на 0
+        # для увеличения значения приспособленности
+        summed_sh = sum(self.sharing_function(genome, other) for other in self.genomes)
+        summed_sh = 1 if summed_sh == 0 else summed_sh  # предотвращение деления на 0
+        fitness = adjust_fitness / summed_sh
+        # препятствие росту более успешных видов для увеличения разнообразия
+        # когда успешный вид заходит в тупик,
+        # то его место может занять ранее менее успешный
         return fitness
+
+    def sharing_function(self, genome1: Genome, genome2: Genome) -> float:
+        # Функция схожести между двумя генотипами
+        delta = self.compatibility_distance(genome1, genome2)
+        if delta < self.compatibility_threshold:
+            return 1
+        return 0
 
     def feed_forward(self, genome: Genome, inputs: np.array) -> float | int:
         hidden_values = {}
@@ -84,7 +102,10 @@ class Population:
         for genome in self.genomes:
             for species in self.species:
                 # если виды одинаковые, то добавляем генотип
-                if self.is_same_species(genome, species.representative):
+                if (
+                    self.compatibility_distance(genome, species.representative)
+                    < self.compatibility_threshold
+                ):
                     species.add_genome(genome)
                     break
             else:
@@ -93,11 +114,10 @@ class Population:
                 self.species.append(new_species)
                 new_species.add_genome(genome)
 
-    def is_same_species(
+    def compatibility_distance(
         self,
         genome1: Genome,
         genome2: Genome,
-        compatibility_threshold: int | float = 3.0,
         c1: int | float = 1.0,
         c2: int | float = 1.0,
         c3: int | float = 0.4,
@@ -156,9 +176,7 @@ class Population:
             + (c2 * disjoint_genes / N)
             + (c3 * weight_diff_sum / matching_genes if matching_genes > 0 else 0)
         )
-        return (
-            compatibility < compatibility_threshold
-        )  # проверка с порогом совместимости
+        return compatibility
 
     def reproduce(self):
         # функция образования нового генотипа (воспроизведение)
